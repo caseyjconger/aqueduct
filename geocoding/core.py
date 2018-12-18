@@ -14,9 +14,10 @@
 import geopandas
 import fiona
 import os
+import pandas as pd
 
 from geopy.geocoders import GoogleV3
-from shapely import Point
+from shapely.geometry import Point
 
 ###############################################################################
 ## CONSTANTS ##################################################################
@@ -24,6 +25,7 @@ from shapely import Point
 
 #TODO: move this to a configuration file
 GOOGLE_GEOCODE_API_KEY = 'AIzaSyAnM0TuA8nP9NUUfCeqb-JBjk93eD2Bdlw'
+#TODO: Need to fix this path - dependent on where the command is issued from
 GDBS = {
     'aqueduct_global': os.path.join(
         os.getcwd(), 'data/aqueduct_global/aqueduct_global_dl_20150409.gdb'
@@ -53,6 +55,10 @@ def get_gu(pt, df):
           to regions which enclose the given point, pt.
     """
     return df[df['geometry'].contains(pt)]['GU'].values
+
+def parse_address(df):
+    return df[['CG667', 'CG668', 'CG669']].apply(', '.join, axis=1)
+
 
 ###############################################################################
 ## ADDRESS TO LAT/LONG ########################################################
@@ -98,6 +104,11 @@ def address_to_loc(addr, api_key=GOOGLE_GEOCODE_API_KEY, return_level=0):
         loc = location.raw
         return loc
 
+def addr_to_point_df(addr_df):
+    loc_df = addr_df.apply(address_to_loc)
+    loc_df = loc_df.apply(lambda x: Point(x['long'], x['lat']))
+    return loc_df
+
 
 ###############################################################################
 ## LOAD GEODATABASE ###########################################################
@@ -129,8 +140,6 @@ def load_GDB(gdb_path, layer=None, df_processor=None):
 ###############################################################################
 
 
-
-
 ###############################################################################
 ## MAIN #######################################################################
 ###############################################################################
@@ -141,6 +150,26 @@ def main():
         location = address_to_loc(addr, return_level=ii)
         print('Level {}:\n{}\n'.format(ii, location))
     df = load_GDB(GDBS['aqueduct_global'], GDB_LAYERS['aqueduct_global'])
+
+    hmb = pd.read_excel(
+        '/Users/casey/exp/data_sources/water_resource/data/HMB-Suppliers-Table.xlsx',
+        header=3
+    )
+
+    hmb['addr'] = parse_address(hmb)
+    hmb = hmb[hmb['addr'].apply(lambda x: ('#N/A' not in x))]
+    loc = addr_to_point_df(hmb['addr'])
+    print(loc)
+    gus = loc.apply(lambda x: get_gu(x, df)[0])
+    hmb_gus = hmb.copy().iloc[gus.index]
+    hmb_gus['GU'] = gus
+    final = hmb_gus.join(df, on='GU', lsuffix='_l', rsuffix='_r')
+    print(final)
+    final.to_csv('final.csv')
+
+
+
+
 
 
 if __name__ == '__main__':
